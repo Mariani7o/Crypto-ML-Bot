@@ -1,0 +1,8 @@
+requests
+pandas
+numpy
+pytz
+ta
+scikit-learn
+python-telegram-bot
+python-dotenv
