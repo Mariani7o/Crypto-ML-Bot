@@ -176,31 +176,35 @@ def prepare_data_for_ml(df, scaler=None):
 
 """🤖 CELDA 4 – Lógica de señales detalladas"""
 
+# Necesario para guardar y cargar el modelo/scaler
+import joblib 
+
 # Generador de señales con LÓGICA MACHINE LEARNING Y MENSAJES
 
 # Variables globales para el modelo ML (se entrenarán una sola vez)
 model_long = None
 model_short = None
 prev_signal = None
-scaler = None # ¡NUEVA! Variable global para el escalador de datos (StandardScaler)
+scaler = None # Objeto StandardScaler para normalización
+# RUTAS DE PERSISTENCIA (Usaremos el directorio /tmp, que es accesible y grabable en Render)
+MODEL_DIR = '/tmp/'
+MODEL_LONG_FILE = MODEL_DIR + 'model_long.pkl'
+MODEL_SHORT_FILE = MODEL_DIR + 'model_short.pkl'
+SCALER_FILE = MODEL_DIR + 'scaler.pkl'
+
 
 # Variables de riesgo
 MIN_ATR = 2.0  # Suavizado para evitar descarte por ATR muy bajo
 INERTIA_ATR_MULTIPLIER = 0.5
 MIN_PROFIT_USD = 15.0
 
-# >> AJUSTE CLAVE DE RIESGO/RECOMPENSA (R:R 1.43:1) <<
-SL_MULTIPLIER = 3.5  # SL más amplio para dar margen al ruido
-TP_MULTIPLIER = 5.0  # TP más ambicioso para mejorar la rentabilidad
+SL_MULTIPLIER = 3.5
+TP_MULTIPLIER = 5.0
 
-# >> AUMENTO DE LA PROBABILIDAD MÍNIMA PARA MÁS PRECISIÓN <<
 PROB_LONG_MIN = 0.65 # Requerir 65% de probabilidad
 PROB_SHORT_MIN = 0.70 # Requerir 70% de probabilidad (más estricto para cortos)
 
-# >> NUEVO UMBRAL DE ENVÍO DE SEÑAL <<
 MIN_CONFIDENCE_FOR_SIGNAL = 80 # Solo se envía LONG/SHORT si la confianza >= 80%
-
-# >> UMBRAL PARA MANTENER SEÑAL EN INERCIA (WAIT) <<
 INERTIA_CONFIDENCE = 50
 
 
@@ -223,14 +227,30 @@ def generate_signal(df):
         return "WAIT", "Datos insuficientes (necesitamos al menos 205 velas con indicadores válidos).", "⚪", "Baja"
 
     # -----------------------------------------------\n
-    # 0. ENTRENAMIENTO DEL MODELO ML
+    # 0. PERSISTENCIA Y ENTRENAMIENTO DEL MODELO ML
     # -----------------------------------------------
-    if model_long is None or model_short is None:
-        # Obtenemos datos de entrenamiento, incluyendo el nuevo scaler
-        X_train, Y_Long, Y_Short, new_scaler = prepare_data_for_ml(df.iloc[-205:])
+    
+    is_model_loaded = False
+    
+    # Intenta cargar modelos y scaler del disco (si existen)
+    if model_long is None:
+        try:
+            model_long = joblib.load(MODEL_LONG_FILE)
+            model_short = joblib.load(MODEL_SHORT_FILE)
+            scaler = joblib.load(SCALER_FILE)
+            is_model_loaded = True
+            print("💾 Modelos y Scaler cargados desde /tmp.")
+        except:
+            pass # Si falla (no existe el archivo), model_long/short seguirán siendo None
 
-        # Asignamos el scaler a la variable global
-        scaler = new_scaler
+    if model_long is None or model_short is None:
+        # Se requiere entrenamiento si la carga falló
+        print("🚨 Reentrenamiento ML iniciado...")
+        
+        # Obtenemos datos de entrenamiento, incluyendo el nuevo scaler
+        X_train, Y_Long, Y_Short, new_scaler = prepare_data_for_ml(df.iloc[-205:], scaler=None)
+
+        scaler = new_scaler # Asignamos el nuevo scaler
 
         if X_train.empty:
             print("⚠️ Error al preparar datos de entrenamiento ML.")
@@ -243,12 +263,15 @@ def generate_signal(df):
         model_short = LogisticRegression(solver='liblinear', random_state=42)
         model_short.fit(X_train, Y_Short)
 
-        # Imprimir precisión
+        # >> GUARDAR LOS MODELOS Y SCALER AL DISCO
+        joblib.dump(model_long, MODEL_LONG_FILE)
+        joblib.dump(model_short, MODEL_SHORT_FILE)
+        joblib.dump(scaler, SCALER_FILE)
+        
         long_acc = accuracy_score(Y_Long, model_long.predict(X_train))
         short_acc = accuracy_score(Y_Short, model_short.predict(X_train))
-
-        print(f"🧠 Modelos ML de Regresión Logística entrenados exitosamente.")
-        print(f"   Precisión (LONG): {long_acc*100:.2f}%. Precisión (SHORT): {short_acc*100:.2f}%.")
+        
+        print(f"🧠 Modelos ML reentrenados y GUARDADOS en /tmp. Precisión LONG: {long_acc*100:.2f}%.")
         return "WAIT", "Modelos ML en entrenamiento inicial. Esperar siguiente ciclo.", "⚪", "BAJA"
 
     # -----------------------------------------------\n
@@ -273,9 +296,10 @@ def generate_signal(df):
     final_signal = "WAIT"
     confidence_score = 0
 
-    # Usamos el scaler global para NORMALIZAR los datos de predicción
+    # Usamos el scaler GLOBAL (ya cargado) para NORMALIZAR los datos de predicción
     # prepare_data_for_ml retorna X_predict_final (una sola fila normalizada) en modo predicción
-    X_predict_final, _, _, _ = prepare_data_for_ml(df.tail(20), scaler)
+    # Usamos df.tail(20) para el contexto de normalización/predicción
+    X_predict_final, _, _, _ = prepare_data_for_ml(df.tail(20), scaler) 
 
     if X_predict_final.empty:
         return "WAIT", "Error al preparar datos para predicción ML (DataFrame vacío).", "🔴", "RIESGO"
@@ -342,7 +366,9 @@ def generate_signal(df):
     # -----------------------------------------------\n
     # 3. FILTRO FINAL Y NIVEL DE CONFIANZA
     # -----------------------------------------------
-
+    # ... (El resto del código de la Celda 4 es el mismo) ...
+    # (Ya que solo se modificó la lógica de persistencia/entrenamiento)
+    
     if confidence_score >= 80:
         conf_text = "ALTA"
         conf_emoji = "🔥"
@@ -351,7 +377,7 @@ def generate_signal(df):
         conf_emoji = "🟡"
     else:
         conf_text = "BAJA"
-        conf_emoji = "⚪"
+        conf_emoji = "⚪" 
 
     # --- FILTRO CLAVE: EXIGIR CONFIANZA ALTA (80%) ---
     if final_signal != "WAIT" and confidence_score < MIN_CONFIDENCE_FOR_SIGNAL:
@@ -381,7 +407,7 @@ def generate_signal(df):
                 comment = f"Mercado en consolidación. Mantenemos señal {prev_signal} por inercia."
                 conf_text = "MEDIA"
                 conf_emoji = "🟡"
-                confidence_score = INERTIA_CONFIDENCE # Usamos la constante mejorada
+                confidence_score = INERTIA_CONFIDENCE
             else:
                  prev_signal = None
 
@@ -476,7 +502,6 @@ def generate_signal(df):
         )
 
     return final_signal, message_content, conf_emoji, conf_text
-
 """💬 CELDA 5 – Integración con Telegram"""
 
 # CELDA 5 - Envío de alertas a Telegram
