@@ -6,6 +6,7 @@ import time
 import pytz
 import ta
 import os
+import joblib
 from datetime import datetime, timezone, timedelta
 from sklearn.linear_model import LogisticRegression # Modelo ML
 from sklearn.model_selection import train_test_split
@@ -175,9 +176,6 @@ def prepare_data_for_ml(df, scaler=None):
         return X_predict_final.iloc[-1].to_frame().T, None, None, scaler
 
 """🤖 CELDA 4 – Lógica de señales detalladas"""
-
-# Necesario para guardar y cargar el modelo/scaler
-import joblib 
 
 # Generador de señales con LÓGICA MACHINE LEARNING Y MENSAJES
 
