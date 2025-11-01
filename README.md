@@ -4,13 +4,13 @@ Signals for trading ETHUSDT.
 
 ## 🌟 Resumen y Objetivo
 
-Este bot de trading algorítmico está diseñado para el mercado de criptomonedas (Binance) enfocándose en la **calidad (precisión) sobre la cantidad**. El objetivo es identificar movimientos de precio de alta probabilidad, filtrando la mayoría del ruido del mercado lateral y de baja volatilidad.
+Este bot de trading algorítmico está diseñado para el mercado de criptomonedas enfocándose en la **calidad (precisión) sobre la cantidad**. El objetivo es identificar movimientos de precio de alta probabilidad, filtrando la mayoría del ruido del mercado lateral y de baja volatilidad.
 
 | Característica | Detalle |
 | :--- | :--- |
 | **Asset Principal** | `ETHUSDT` (Configurable) |
 | **Intervalo de Operación** | **5 minutos (`5m`)** |
-| **Modelo Central** | Regresión Logística (Entrenamiento dinámico) |
+| **Modelo Central** | **Regresión Logística** (Clasificador Binario) |
 | **Filtro Clave** | **Confianza ML ≥ 80% (ALTA)** |
 | **Riesgo/Recompensa** | Estricta relación R:R favorable (SL/TP dinámico por ATR). |
 | **Despliegue** | **Render.com** (Worker 24/7). |
@@ -25,17 +25,39 @@ El bot utiliza una combinación de indicadores técnicos y un modelo de Machine 
 
 El modelo predice movimientos significativos de **$0.3\%$ o más** en las siguientes 5 velas (25 minutos).
 
+**Detalles Técnicos del Modelo (Para Portafolio):**
+* **Modelo:** `LogisticRegression` (Scikit-learn).
+* **Clasificación:** Binaria (Clase 1: Movimiento exitoso / Clase 0: Falla).
+* **Target (Objetivo):** El modelo se entrena en la probabilidad de que el precio alcance un profit target de $0.3\%$ antes de alcanzar un stop loss.
+* **Entrenamiento:** El modelo se entrena dinámicamente con las **últimas 200 velas** de datos históricos para asegurar su adaptación a las condiciones actuales del mercado.
+
 ### 2. Filtros de Señal (Alta Confianza)
 
 Solo se emite una señal **LONG** o **SHORT** si se cumplen simultáneamente:
 
 1.  **Puntaje ML Alto:** La confianza de la predicción debe ser **80% o superior**.
 2.  **Validación Técnica:** La señal no debe estar en una zona extrema (ej. No LONG en sobrecompra/resistencia).
-3.  **Volatilidad Suficiente:** Se requiere un nivel mínimo de **ATR** para asegurar que la operación sea viable.
+3.  **Volatilidad Suficiente:** Se requiere un nivel mínimo de **ATR ($\ge 2.0$)** para asegurar que la operación sea viable.
 
 ### 3. Gestión de Riesgo Dinámica (SL/TP)
 
 Los niveles de Stop Loss (SL) y Take Profit (TP) se ajustan automáticamente a la volatilidad del momento, utilizando el **Average True Range (ATR)**.
+
+**Fórmulas de Riesgo (Método de Volatilidad):**
+
+* **Stop Loss (SL):** $\text{Precio Actual} \pm (\text{ATR} \times \mathbf{3.5})$
+* **Take Profit (TP):** $\text{Precio Actual} \mp (\text{ATR} \times \mathbf{5.0})$
+* **Relación R:R:** $\approx \mathbf{1.43} : 1$ (Asegura rentabilidad con una tasa de acierto moderada).
+
+---
+
+## 💬 Alertas y Contacto
+
+Las alertas de trading son enviadas en tiempo real al siguiente canal de Telegram.
+
+| Servicio | Enlace |
+| :--- | :--- |
+| **Canal de Alertas** | [Crypto ML Signals](https://t.me/+XDENLb1kPik4MDUx) |
 
 ---
 
@@ -52,7 +74,7 @@ El bot está configurado para correr continuamente en la nube. La ejecución se 
 
 ### 🔒 Variables de Entorno (Seguridad)
 
-Para mantener la seguridad, el bot lee sus claves de Telegram directamente desde el entorno del servidor (Render). **Estas claves deben configurarse en Render, no en el código.**
+Para mantener la seguridad, el bot lee las claves de Telegram directamente desde el entorno del servidor (Render). **Estas claves deben configurarse en Render, no en el código.**
 
 | Variable | Propósito |
 | :--- | :--- |
@@ -62,7 +84,7 @@ Para mantener la seguridad, el bot lee sus claves de Telegram directamente desde
 ---
 ## 🤝 Contribuciones y Desarrollo
 
-Este proyecto fue diseñado como una solución de trading personal. Se fomenta la experimentación y el desarrollo continuo.
+Este proyecto fue diseñado como una solución de trading personal. 
 
 Siéntase libre de **bifurcar (fork)** este repositorio para:
 
