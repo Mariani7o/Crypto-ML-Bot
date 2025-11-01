@@ -520,38 +520,93 @@ def send_telegram_message(token, chat_id, message):
 
 """🔁 CELDA 6 – Monitoreo automático y envío de señales"""
 
-# Bucle principal de ejecución (CORREGIDA)
+# Importaciones necesarias para esta estructura
+import sys # Para sys.exit()
 
-# Requerimiento mínimo de velas para EMA 200/ADX es 200. Usamos 250 por seguridad.
-SAMPLES = 250
-# Tiempo de espera en segundos. Si INTERVAL es "5m", esperar 300 segundos.
-interval_sec = 300
+# ... (El resto de las variables globales y funciones de la Celda 5, 4, 3, etc. se mantienen) ...
 
-# Variables de estado globales (para el recordatorio)
-last_signal = "INIT"
-last_msg_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires"))
-REMINDER_MINUTES = 30 # Recordatorio si no hay cambios en 30 minutos
+# ------------------------------------------------------------------
+# >> NUEVA FUNCIÓN DE INICIALIZACIÓN (Se ejecuta SOLO una vez) <<
+# ------------------------------------------------------------------
+def initialize_models(df):
+    global model_long, model_short, scaler
 
-# >> NUEVA FUNCIÓN PARA ENVOLVER EL BUCLE PRINCIPAL <<
+    # 🛑 Lógica copiada del generate_signal para forzar el entrenamiento inicial
+    
+    if len(df) < 205:
+        print("⚠️ DATOS INSUFICIENTES PARA ENTRENAMIENTO. Requeridos 205.")
+        return False
+
+    # Entrenar y guardar
+    try:
+        X_train, Y_Long, Y_Short, new_scaler = prepare_data_for_ml(df.iloc[-205:], scaler=None)
+
+        model_long = LogisticRegression(solver='liblinear', random_state=42)
+        model_long.fit(X_train, Y_Long)
+
+        model_short = LogisticRegression(solver='liblinear', random_state=42)
+        model_short.fit(X_train, Y_Short)
+        
+        # Asignamos el scaler y guardamos
+        scaler = new_scaler
+        joblib.dump(model_long, MODEL_LONG_FILE)
+        joblib.dump(model_short, MODEL_SHORT_FILE)
+        joblib.dump(scaler, SCALER_FILE)
+        
+        print("✅ INICIALIZACIÓN COMPLETA. Modelos guardados en /tmp.")
+        return True
+        
+    except Exception as e:
+        print(f"❌ ERROR FATAL EN EL ENTRENAMIENTO INICIAL: {e}")
+        return False
+
+
+# ------------------------------------------------------------------
+# >> FUNCIÓN DE EJECUCIÓN (run_bot)
+# ------------------------------------------------------------------
 def run_bot():
-    global last_signal, last_msg_time
+    global last_signal, last_msg_time, model_long, model_short, scaler
+    
+    print("--------------------------------------------------")
+    print("🚀 INICIO DEL PROCESO DE TRADING ML")
+    
+    # 1. PASO DE INICIALIZACIÓN Y CARGA DE MODELOS
+    # Intentamos cargar primero. Si falla, entrenamos.
+    try:
+        model_long = joblib.load(MODEL_LONG_FILE)
+        model_short = joblib.load(MODEL_SHORT_FILE)
+        scaler = joblib.load(SCALER_FILE)
+        print("✅ Modelos ML cargados desde /tmp (Estado guardado).")
+    except:
+        print("⚠️ Modelos no encontrados. Iniciando ENTRENAMIENTO OBLIGATORIO.")
+        
+        # Si la carga falla, descargamos datos para el entrenamiento inicial
+        df_initial = get_intraday_data(symbol=SYMBOL, interval=INTERVAL, samples=250)
+        
+        if not initialize_models(df_initial):
+            # Si initialize_models retorna False, forzamos la salida para que Render reinicie
+            print("❌ FALLO AL INICIALIZAR. Forzando el cierre del Worker.")
+            sys.exit(1)
 
+
+    # 2. BUCLE PRINCIPAL (while True) - SOLO PREDICCIÓN
+    # --------------------------------------------------
     while True:
-        print(f"Buscando {SAMPLES} velas de {SYMBOL} en {INTERVAL}...")
-
-        # LLAMADA A LA API DE BINANCE USANDO LA FUNCIÓN DE LA CELDA 3
-        df = get_intraday_data(symbol=SYMBOL, interval=INTERVAL, samples=SAMPLES)
+        # LLAMADA A LA API DE BINANCE
+        df = get_intraday_data(symbol=SYMBOL, interval=INTERVAL, samples=250)
 
         if df.empty:
-            print("⚠️ No se pudieron obtener datos o datos insuficientes. Reintentando en 30s...")
+            print("⚠️ No se pudieron obtener datos. Reintentando...")
             time.sleep(30)
             continue
 
-        # 1. Generar la señal
+        # Generar la señal
         final_signal, message, conf_emoji, conf_text = generate_signal(df)
-        ba_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires"))
+        
+        # ... (El resto de la lógica de envío, sleep, y recordatorio se mantiene) ...
+        # ... (Se mantiene la misma lógica de envío que tienes en la Celda 6) ...
 
-        # 2. Lógica de Envío y Recordatorio
+        ba_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires"))
         send_message = False
 
         if final_signal != last_signal:
@@ -560,23 +615,18 @@ def run_bot():
             if final_signal == "WAIT":
                 send_message = True
 
-        # Si vamos a enviar, actualizamos el estado
         if send_message:
             last_signal = final_signal
             last_msg_time = ba_time
-
             print(f"📡 Enviando señal a Telegram: {final_signal} | Confianza: {conf_text}")
-
             send_telegram_message(TELEGRAM_TOKEN, CHAT_ID, message)
-
         else:
             time_to_next = REMINDER_MINUTES * 60 - (ba_time - last_msg_time).total_seconds()
             mins = time_to_next / 60
             print(f"📭 Señal {final_signal} sin cambios. Próximo recordatorio en {mins:.1f} min.")
 
-        # 3. Esperar el tiempo del intervalo (5 minutos en este caso)
-        time.sleep(interval_sec)
+        time.sleep(300) # Espera 5 minutos
 
-# >> LLAMADA FINAL Y PROFESIONAL AL SCRIPT <<
+# >> LLAMADA FINAL AL SCRIPT
 if __name__ == "__main__":
     run_bot()
