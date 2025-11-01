@@ -6,3 +6,4 @@ ta
 scikit-learn
 python-telegram-bot
 python-dotenv
+joblib
