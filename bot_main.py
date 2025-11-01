@@ -501,60 +501,59 @@ def send_telegram_message(token, chat_id, message):
 
 # Requerimiento mínimo de velas para EMA 200/ADX es 200. Usamos 250 por seguridad.
 SAMPLES = 250
-# Tiempo de espera en segundos. Si INTERVAL es "1m" (Celda 2), esperar 60 segundos.
+# Tiempo de espera en segundos. Si INTERVAL es "5m", esperar 300 segundos.
 interval_sec = 300
 
-# NOTA: Las variables SYMBOL, INTERVAL, TELEGRAM_TOKEN, CHAT_ID,
-# y la función send_telegram_message() son accesibles desde la Celda 5.
-
-# Variables de estado (para el recordatorio)
+# Variables de estado globales (para el recordatorio)
 last_signal = "INIT"
 last_msg_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires"))
 REMINDER_MINUTES = 30 # Recordatorio si no hay cambios en 30 minutos
 
-while True:
-    print(f"Buscando {SAMPLES} velas de {SYMBOL} en {INTERVAL}...")
+# >> NUEVA FUNCIÓN PARA ENVOLVER EL BUCLE PRINCIPAL <<
+def run_bot():
+    global last_signal, last_msg_time
 
-    # >> LLAMADA A LA API DE BINANCE USANDO LA FUNCIÓN DE LA CELDA 3 <<
-    df = get_intraday_data(symbol=SYMBOL, interval=INTERVAL, samples=SAMPLES)
+    while True:
+        print(f"Buscando {SAMPLES} velas de {SYMBOL} en {INTERVAL}...")
 
-    if df.empty:
-        print("⚠️ No se pudieron obtener datos o datos insuficientes. Reintentando en 30s...")
-        time.sleep(30)
-        continue
+        # LLAMADA A LA API DE BINANCE USANDO LA FUNCIÓN DE LA CELDA 3
+        df = get_intraday_data(symbol=SYMBOL, interval=INTERVAL, samples=SAMPLES)
 
-    # 1. Generar la señal
-    final_signal, message, conf_emoji, conf_text = generate_signal(df)
-    ba_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires"))
+        if df.empty:
+            print("⚠️ No se pudieron obtener datos o datos insuficientes. Reintentando en 30s...")
+            time.sleep(30)
+            continue
 
-    # 2. Lógica de Envío y Recordatorio
-    send_message = False
+        # 1. Generar la señal
+        final_signal, message, conf_emoji, conf_text = generate_signal(df)
+        ba_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires"))
 
-    # Lógica 1: Si la señal es nueva o ha cambiado
-    if final_signal != last_signal:
-        send_message = True
+        # 2. Lógica de Envío y Recordatorio
+        send_message = False
 
-    # Lógica 2: Recordatorio (si no ha habido cambios en REMINDER_MINUTES)
-    elif (ba_time - last_msg_time).total_seconds() >= REMINDER_MINUTES * 60:
-        # Solo enviamos un WAIT de recordatorio
-        if final_signal == "WAIT":
+        if final_signal != last_signal:
             send_message = True
+        elif (ba_time - last_msg_time).total_seconds() >= REMINDER_MINUTES * 60:
+            if final_signal == "WAIT":
+                send_message = True
 
-    # Si vamos a enviar, actualizamos el estado
-    if send_message:
-        last_signal = final_signal
-        last_msg_time = ba_time
+        # Si vamos a enviar, actualizamos el estado
+        if send_message:
+            last_signal = final_signal
+            last_msg_time = ba_time
 
-        print(f"📡 Enviando señal a Telegram: {final_signal} | Confianza: {conf_text}")
+            print(f"📡 Enviando señal a Telegram: {final_signal} | Confianza: {conf_text}")
 
-        # CORRECCIÓN: Descomentar la llamada a la función de envío
-        send_telegram_message(TELEGRAM_TOKEN, CHAT_ID, message)
+            send_telegram_message(TELEGRAM_TOKEN, CHAT_ID, message)
 
-    else:
-        # Calcula el tiempo restante para el próximo recordatorio
-        time_to_next = REMINDER_MINUTES * 60 - (ba_time - last_msg_time).total_seconds()
-        mins = time_to_next / 60
-        print(f"📭 Señal {final_signal} sin cambios. Próximo recordatorio en {mins:.1f} min.")
+        else:
+            time_to_next = REMINDER_MINUTES * 60 - (ba_time - last_msg_time).total_seconds()
+            mins = time_to_next / 60
+            print(f"📭 Señal {final_signal} sin cambios. Próximo recordatorio en {mins:.1f} min.")
 
-    # 3. Esperar el tiempo del intervalo (1 minuto en este caso)
-    time.sleep(interval_sec)
+        # 3. Esperar el tiempo del intervalo (5 minutos en este caso)
+        time.sleep(interval_sec)
+
+# >> LLAMADA FINAL Y PROFESIONAL AL SCRIPT <<
+if __name__ == "__main__":
+    run_bot()
