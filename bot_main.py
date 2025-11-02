@@ -529,13 +529,9 @@ REMINDER_MINUTES = 30 # Recordatorio si no hay cambios en 30 minutos
 
 def initialize_models(df):
     global model_long, model_short, scaler
-    # ... (El código de inicialización que ya te envié está aquí, se omite por brevedad) ...
-    # ... (El código de inicialización es el mismo) ...
+    # ... (código de inicialización) ...
+    # Se asume que el código completo de initialize_models está correcto en el archivo
     
-    # 🛑 Esto debe ser el código completo de la función initialize_models que ya tienes
-    
-    # --------------------------------------------------
-    # Esta es la parte crítica:
     if len(df) < 205:
         print("⚠️ DATOS INSUFICIENTES PARA ENTRENAMIENTO. Requeridos 205.")
         return False
@@ -560,15 +556,13 @@ def initialize_models(df):
     except Exception as e:
         print(f"❌ ERROR FATAL EN EL ENTRENAMIENTO INICIAL: {e}")
         return False
-    
-    # ... (Fin de la función initialize_models) ...
-    # --------------------------------------------------
 
-# >> FUNCIÓN DE EJECUCIÓN (run_bot)
+
 def run_bot():
-    global model_long, model_short, scaler
-
-    # >> CORRECCIÓN CLAVE: Inicialización LOCAL de las variables de estado
+    
+    global model_long, model_short, scaler, TELEGRAM_TOKEN, CHAT_ID
+    
+    # Inicialización LOCAL de las variables de estado del bucle
     last_signal = "INIT"
     last_msg_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires"))
     
@@ -608,8 +602,7 @@ def run_bot():
         # 3. Lógica de Envío y Recordatorio
         send_message = False
 
-        # >> CORRECCIÓN: Uso de la variable 'last_signal' LOCAL
-        if final_signal != last_signal: 
+        if final_signal != last_signal:
             send_message = True
         elif (ba_time - last_msg_time).total_seconds() >= REMINDER_MINUTES * 60:
             if final_signal == "WAIT":
@@ -617,9 +610,11 @@ def run_bot():
 
         if send_message:
             last_signal = final_signal
-            last_msg_time = ba_time # Actualiza la variable LOCAL
+            last_msg_time = ba_time
             print(f"📡 Enviando señal a Telegram: {final_signal} | Confianza: {conf_text}")
-            send_telegram_message(TELEGRAM_TOKEN, CHAT_ID, message)
+            
+            send_telegram_message(TELEGRAM_TOKEN, CHAT_ID, message) 
+            
         else:
             time_to_next = REMINDER_MINUTES * 60 - (ba_time - last_msg_time).total_seconds()
             mins = time_to_next / 60
@@ -628,6 +623,6 @@ def run_bot():
         time.sleep(interval_sec)
 
 
-# >> LLAMADA FINAL AL SCRIPT
+# LLAMADA FINAL AL SCRIPT
 if __name__ == "__main__":
     run_bot()
