@@ -524,14 +524,10 @@ SAMPLES = 250
 interval_sec = 300
 REMINDER_MINUTES = 30 # Recordatorio si no hay cambios en 30 minutos
 
-# Nota: SYMBOL, INTERVAL, etc. son variables globales de la Celda 2.
-
 
 def initialize_models(df):
     global model_long, model_short, scaler
-    # ... (código de inicialización) ...
-    # Se asume que el código completo de initialize_models está correcto en el archivo
-    
+        
     if len(df) < 205:
         print("⚠️ DATOS INSUFICIENTES PARA ENTRENAMIENTO. Requeridos 205.")
         return False
@@ -559,10 +555,14 @@ def initialize_models(df):
 
 
 def run_bot():
+    global model_long, model_short, scaler
     
-    global model_long, model_short, scaler, TELEGRAM_TOKEN, CHAT_ID
+      
+    # Leer variables de entorno (necesario dentro de la función)
+    TOKEN = os.environ.get("TELEGRAM_TOKEN") 
+    CHAT_ID_VAR = os.environ.get("CHAT_ID")
     
-    # Inicialización LOCAL de las variables de estado del bucle
+    # Variables de estado del bucle
     last_signal = "INIT"
     last_msg_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires"))
     
@@ -613,7 +613,8 @@ def run_bot():
             last_msg_time = ba_time
             print(f"📡 Enviando señal a Telegram: {final_signal} | Confianza: {conf_text}")
             
-            send_telegram_message(TELEGRAM_TOKEN, CHAT_ID, message) 
+            # >> ENVÍO: USAR LAS VARIABLES LOCALES/CARGADAS
+            send_telegram_message(TOKEN, CHAT_ID_VAR, message) 
             
         else:
             time_to_next = REMINDER_MINUTES * 60 - (ba_time - last_msg_time).total_seconds()
@@ -623,6 +624,5 @@ def run_bot():
         time.sleep(interval_sec)
 
 
-# LLAMADA FINAL AL SCRIPT
 if __name__ == "__main__":
     run_bot()
