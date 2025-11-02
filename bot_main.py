@@ -504,17 +504,15 @@ def generate_signal(df):
 
 # CELDA 5 - Envío de alertas a Telegram
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
-
 def send_telegram_message(token, chat_id, message):
     """Envía mensaje al bot de Telegram"""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    # >> CAMBIO CLAVE DE MARKDOWN A HTML <<
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"} 
     try:
         r = requests.post(url, data=payload)
         r.raise_for_status()
-        print("✅ Mensaje enviado a Telegram.")
+        # print("✅ Mensaje enviado a Telegram.") # Si quieres ver el log de éxito
     except Exception as e:
         print("❌ Error enviando mensaje a Telegram:", e)
 
