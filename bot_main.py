@@ -353,652 +353,343 @@ def prepare_data_for_ml(df, scaler=None):
 
 
 """🤖 CELDA 4 – Lógica de señales detalladas"""
-
-
-
 # Generador de señales con LÓGICA MACHINE LEARNING Y MENSAJES
 
-
-
 # Variables globales para el modelo ML (se entrenarán una sola vez)
-
 model_long = None
-
 model_short = None
-
 prev_signal = None
+scaler = None 
+signal_cycle_counter = 0 # Contador para la regla de estabilidad
 
-scaler = None # Objeto StandardScaler para normalización
 
 # RUTAS DE PERSISTENCIA (Usaremos el directorio /tmp, que es accesible y grabable en Render)
-
 MODEL_DIR = '/tmp/'
-
 MODEL_LONG_FILE = MODEL_DIR + 'model_long.pkl'
-
 MODEL_SHORT_FILE = MODEL_DIR + 'model_short.pkl'
-
 SCALER_FILE = MODEL_DIR + 'scaler.pkl'
 
 
-
-
-
 # Variables de riesgo
-
-MIN_ATR = 2.0  # Suavizado para evitar descarte por ATR muy bajo
-
+MIN_ATR = 2.0  
 INERTIA_ATR_MULTIPLIER = 0.5
-
 MIN_PROFIT_USD = 15.0
 
+# >> AJUSTES ASIMÉTRICOS DE RIESGO/RECOMPENSA <<
+SL_MULTIPLIER_LONG = 4.0 # SL más amplio para LONG (mayor tolerancia al ruido)
+TP_MULTIPLIER_LONG = 5.0 
 
+SL_MULTIPLIER_SHORT = 3.5 # SL estándar para SHORT
+TP_MULTIPLIER_SHORT = 5.0
 
-SL_MULTIPLIER = 3.5
-
-TP_MULTIPLIER = 5.0
-
-
-
-PROB_LONG_MIN = 0.65 # Requerir 65% de probabilidad
-
-PROB_SHORT_MIN = 0.70 # Requerir 70% de probabilidad (más estricto para cortos)
-
-
+# >> PROBABILIDAD MÍNIMA ASIMÉTRICA <<
+PROB_LONG_MIN = 0.58 # 58% de probabilidad requerida para LONG
+PROB_SHORT_MIN = 0.70 # 70% de probabilidad requerida para SHORT
 
 MIN_CONFIDENCE_FOR_SIGNAL = 80 # Solo se envía LONG/SHORT si la confianza >= 80%
-
 INERTIA_CONFIDENCE = 50
 
-
-
+CYCLES_TO_IGNORE_FILTERS = 10 # 10 ciclos * 5 minutos = 50 minutos de estabilidad
 
 
 def generate_signal(df):
-
-    # Aseguramos que podemos leer y escribir en estas variables globales
-
-    global prev_signal, model_long, model_short, scaler
-
-
-
+    global prev_signal, model_long, model_short, scaler, signal_cycle_counter
+    
     # -----------------------------------------------\n
-
-    # 0. VERIFICACIÓN DE DATOS
-
+    # 0. VERIFICACIÓN DE DATOS Y PERSISTENCIA (JOBILB)
     # -----------------------------------------------
-
-
 
     if df.empty:
-
         return "WAIT", "Datos insuficientes (DataFrame vacío).", "⚪", "Baja"
 
-
-
     if "RSI" not in df.columns:
-
         return "WAIT", "Error interno: Columna RSI faltante. ¿Se ejecutó Celda 3?", "🔴", "RIESGO"
 
-
-
-    # Usaremos 200 velas para entrenamiento, así que necesitamos al menos 200 + FUTURE_CANDLES
-
     if len(df) < 205 or df["RSI"].isnull().all():
-
         return "WAIT", "Datos insuficientes (necesitamos al menos 205 velas con indicadores válidos).", "⚪", "Baja"
 
-
-
-    # -----------------------------------------------\n
-
-    # 0. PERSISTENCIA Y ENTRENAMIENTO DEL MODELO ML
-
-    # -----------------------------------------------
-
-    
-
-    is_model_loaded = False
-
-    
-
-    # Intenta cargar modelos y scaler del disco (si existen)
-
+    # --- Lógica de Carga y Entrenamiento (Se asume correcta con joblib) ---
     if model_long is None:
-
         try:
-
             model_long = joblib.load(MODEL_LONG_FILE)
-
             model_short = joblib.load(MODEL_SHORT_FILE)
-
             scaler = joblib.load(SCALER_FILE)
-
-            is_model_loaded = True
-
             print("💾 Modelos y Scaler cargados desde /tmp.")
-
         except:
-
-            pass # Si falla (no existe el archivo), model_long/short seguirán siendo None
-
-
+            pass 
 
     if model_long is None or model_short is None:
-
-        # Se requiere entrenamiento si la carga falló
-
-        print("🚨 Reentrenamiento ML iniciado...")
-
+        # Lógica de entrenamiento (omitida por brevedad, se asume que está en tu archivo)
+        # --------------------------------------------------------------------------------
         
-
         # Obtenemos datos de entrenamiento, incluyendo el nuevo scaler
-
         X_train, Y_Long, Y_Short, new_scaler = prepare_data_for_ml(df.iloc[-205:], scaler=None)
 
-
-
-        scaler = new_scaler # Asignamos el nuevo scaler
-
-
+        scaler = new_scaler 
 
         if X_train.empty:
-
             print("⚠️ Error al preparar datos de entrenamiento ML.")
-
             return "WAIT", "Error al preparar datos de entrenamiento ML.", "🔴", "RIESGO"
 
 
-
-
-
         model_long = LogisticRegression(solver='liblinear', random_state=42)
-
         model_long.fit(X_train, Y_Long)
 
-
-
         model_short = LogisticRegression(solver='liblinear', random_state=42)
-
         model_short.fit(X_train, Y_Short)
 
-
-
-        # >> GUARDAR LOS MODELOS Y SCALER AL DISCO
-
         joblib.dump(model_long, MODEL_LONG_FILE)
-
         joblib.dump(model_short, MODEL_SHORT_FILE)
-
         joblib.dump(scaler, SCALER_FILE)
-
         
-
         long_acc = accuracy_score(Y_Long, model_long.predict(X_train))
-
-        short_acc = accuracy_score(Y_Short, model_short.predict(X_train))
-
+        short_acc = accuracy_score(Y_Short, model_long.predict(X_train))
         
-
         print(f"🧠 Modelos ML reentrenados y GUARDADOS en /tmp. Precisión LONG: {long_acc*100:.2f}%.")
-
         return "WAIT", "Modelos ML en entrenamiento inicial. Esperar siguiente ciclo.", "⚪", "BAJA"
-
-
+        # --------------------------------------------------------------------------------
 
     # -----------------------------------------------\n
-
-    # 1. TOMA DE DATOS E INDICADORES
-
+    # 1. TOMA DE DATOS E INDICADORES (Necesarios para la predicción)
     # -----------------------------------------------
-
     current_data = df.iloc[-1]
-
     last_price = current_data["price"]
-
     rsi = current_data["RSI"]
-
     bb_upper = current_data["BB_UPPER"]
-
     bb_lower = current_data["BB_LOWER"]
-
     ema_20 = current_data["EMA_20"]
-
     ema_50 = current_data["EMA_50"]
-
     atr = current_data["ATR"]
-
     ema_200 = current_data["EMA_200"]
-
     macd_hist = current_data["MACD_HIST"]
-
     adx = current_data["ADX"]
-
-
-
+    
     # -----------------------------------------------\n
-
     # 2. DEFINICIÓN DE SEÑAL Y PROBABILIDAD (ML)
-
     # -----------------------------------------------
-
-
 
     final_signal = "WAIT"
-
     confidence_score = 0
-
-
-
-    # Usamos el scaler GLOBAL (ya cargado) para NORMALIZAR los datos de predicción
-
-    # prepare_data_for_ml retorna X_predict_final (una sola fila normalizada) en modo predicción
-
-    # Usamos df.tail(20) para el contexto de normalización/predicción
 
     X_predict_final, _, _, _ = prepare_data_for_ml(df.tail(20), scaler) 
 
-
-
     if X_predict_final.empty:
-
         return "WAIT", "Error al preparar datos para predicción ML (DataFrame vacío).", "🔴", "RIESGO"
 
+    X_predict_final = X_predict_final.iloc[-1].to_frame().T 
 
-
-    # Predicción de probabilidades
-
-    prob_long = model_long.predict_proba(X_predict_final)[0][1]
-
+    prob_long = model_long.predict_proba(X_predict_final)[0][1] 
     prob_short = model_short.predict_proba(X_predict_final)[0][1]
 
-
-
     confidence_score_long = int(prob_long * 100)
-
     confidence_score_short = int(prob_short * 100)
 
-
-
     # --- Determinar la condición técnica más relevante y ZONAS DE RIESGO ---
-
     is_oversold_area = rsi < 35 or last_price <= bb_lower
-
     is_overbought_area = rsi > 65 or last_price >= bb_upper
 
-
-
     base_comment = "Predicción basada en patrón de volatilidad y momentum."
-
     if is_oversold_area:
-
         base_comment = "Cerca de Soporte/Sobreventa. Buscar rebote."
-
     elif is_overbought_area:
-
         base_comment = "Cerca de Resistencia/Sobrecompra. Buscar corrección."
-
     elif ema_20 > ema_50 and macd_hist > 0:
-
         base_comment = "Continuación Alcista (EMAs alineadas y MACD positivo)."
-
     elif ema_50 > ema_20 and macd_hist < 0:
-
         base_comment = "Continuación Bajista (EMAs alineadas y MACD negativo)."
 
 
-
-
-
-    # Lógica de ML con Filtro de Zona
-
+    # Lógica de ML con Filtro de Zona (APLICANDO ASIMETRÍA)
     if prob_long > PROB_LONG_MIN and prob_long > prob_short:
-
         # Descartar LONG si está en zona de Sobrecompra/Resistencia
-
         if is_overbought_area:
-
              final_signal = "WAIT"
-
              comment = f"ML LONG descartado: En zona de Resistencia/Sobrecompra ({rsi:.1f})."
-
         else:
-
              final_signal = "LONG"
-
              confidence_score = confidence_score_long
-
              comment = f"ML LONG. {base_comment} Probabilidad de éxito ({prob_long*100:.1f}%)"
-
-
-
+        
     elif prob_short > PROB_SHORT_MIN and prob_short > prob_long:
-
         # Descartar SHORT si está en zona de Sobreventa/Soporte
-
         if is_oversold_area:
-
             final_signal = "WAIT"
-
             comment = f"ML SHORT descartado: En zona de Soporte/Sobreventa ({rsi:.1f})."
-
         else:
-
             final_signal = "SHORT"
-
             confidence_score = confidence_score_short
-
             comment = f"ML SHORT. {base_comment} Probabilidad de éxito ({prob_short*100:.1f}%)"
-
-
-
+        
     else:
-
         final_signal = "WAIT"
 
-
-
         if abs(prob_long - prob_short) < 0.05:
-
             wait_reason = "Probabilidades de subida y bajada están muy parejas."
-
         elif prob_long > prob_short and prob_long < PROB_LONG_MIN:
-
             wait_reason = f"Predicción alcista es débil (solo {prob_long*100:.1f}%)."
-
         elif prob_short > prob_long and prob_short < PROB_SHORT_MIN:
-
             wait_reason = f"Predicción bajista es débil (solo {prob_short*100:.1f}%)."
-
         else:
-
             wait_reason = "Probabilidad de movimiento decisivo es insuficiente."
 
-
-
         comment = f"Mercado indefinido: {wait_reason}"
-
         confidence_score = max(confidence_score_long, confidence_score_short)
 
 
-
-
-
     # -----------------------------------------------\n
-
     # 3. FILTRO FINAL Y NIVEL DE CONFIANZA
-
     # -----------------------------------------------
-
-    # ... (El resto del código de la Celda 4 es el mismo) ...
-
-    # (Ya que solo se modificó la lógica de persistencia/entrenamiento)
-
-    
 
     if confidence_score >= 80:
-
         conf_text = "ALTA"
-
         conf_emoji = "🔥"
-
     elif confidence_score >= 60:
-
         conf_text = "MEDIA"
-
         conf_emoji = "🟡"
-
     else:
-
         conf_text = "BAJA"
-
         conf_emoji = "⚪" 
 
-
-
     # --- FILTRO CLAVE: EXIGIR CONFIANZA ALTA (80%) ---
-
     if final_signal != "WAIT" and confidence_score < MIN_CONFIDENCE_FOR_SIGNAL:
-
         comment = f"ML descartado: Confianza ({confidence_score}%) por debajo del umbral ALTA ({MIN_CONFIDENCE_FOR_SIGNAL}%)."
-
         final_signal = "WAIT"
-
         conf_text = "BAJA"
-
         conf_emoji = "⚪"
 
+    
+    # ------------------------------------------------------------------
+    # >> 🛑 MEJORA CLAVE DE ESTABILIDAD: IGNORAR FILTROS DESPUÉS DE LA SEÑAL <<
+    # ------------------------------------------------------------------
 
-
-    # --- FILTROS DE RIESGO ---
-
+    # --- FILTROS DE RIESGO DE BAJA CONFIANZA (Se mantienen) ---
     is_lateral = abs(df["price"].iloc[-5] - last_price) < atr * INERTIA_ATR_MULTIPLIER
-
-
-
+    
+    
+    # Condición 1: Si la señal actual es LONG/SHORT
     if final_signal != "WAIT":
-
-        if atr < MIN_ATR or is_lateral:
-
-            final_signal = "WAIT"
-
-            comment = f"ML descartado: Volatilidad muy baja (ATR {atr:.2f}) o lateralidad extrema."
-
-            conf_text = "RIESGO"
-
-            conf_emoji = "🔴"
-
-            prev_signal = None
-
+        # Condición 1a: Si la señal de ALTA Confianza pasa los filtros de riesgo
+        if atr >= MIN_ATR and not is_lateral:
+            # Si pasa, establecemos el contador de estabilidad
+            signal_cycle_counter = 1
+            prev_signal = final_signal 
+            
         else:
+            # Si NO pasa el filtro, descartamos
+            final_signal = "WAIT"
+            comment = f"ML descartado: Volatilidad muy baja (ATR {atr:.2f}) o lateralidad extrema."
+            conf_text = "RIESGO" 
+            conf_emoji = "🔴"
+            prev_signal = None 
 
-             prev_signal = final_signal
-
+    # Condición 2: Si la señal actual es WAIT, pero estamos en el período de estabilidad
+    elif final_signal == "WAIT" and prev_signal in ["LONG", "SHORT"] and signal_cycle_counter < CYCLES_TO_IGNORE_FILTERS:
+        
+        # Mantenemos la señal anterior y aumentamos el contador
+        final_signal = prev_signal
+        comment = f"Mantenemos señal {prev_signal} (Estabilidad - Ciclo {signal_cycle_counter+1}/{CYCLES_TO_IGNORE_FILTERS})."
+        
+        # Aumentar el contador de estabilidad para el siguiente ciclo
+        signal_cycle_counter += 1
+        conf_text = "MEDIA" # Bajamos la confianza solo en el texto del recordatorio
+        conf_emoji = "🟡"
+        confidence_score = INERTIA_CONFIDENCE
+        
     else:
-
-        # Si la señal es WAIT, verificamos inercia
-
-        if prev_signal in ["LONG", "SHORT"]:
-
-            last_signal_price = df["price"].iloc[-2]
-
-            if abs(last_price - last_signal_price) < atr * INERTIA_ATR_MULTIPLIER:
-
-                final_signal = prev_signal
-
-                comment = f"Mercado en consolidación. Mantenemos señal {prev_signal} por inercia."
-
-                conf_text = "MEDIA"
-
-                conf_emoji = "🟡"
-
-                confidence_score = INERTIA_CONFIDENCE
-
-            else:
-
-                 prev_signal = None
-
+        # Resetear el contador si no hay señal y no hay inercia
+        signal_cycle_counter = 0
+        prev_signal = None
 
 
     # -----------------------------------------------\n
-
     # 4. CONSTRUCCIÓN DEL MENSAJE FINAL UNIFICADO (Con Emojis y SL/TP)
-
     # -----------------------------------------------
 
-
-
     stop_loss_val = 0.0
-
     take_profit_val = 0.0
-
     signal_color_emoji = "⚪"
 
-
-
     # EMOJIS DE CONTEXTO
-
     ema_trend = ema_20 > ema_50
-
-    if ema_trend: trend_label = "Tendencia ⬆️ Alcista"
-
-    else: trend_label = "Tendencia ⬇️ Bajista"
-
-
-
+    if ema_trend: trend_label = "Tendencia ⬆️ Alcista" 
+    else: trend_label = "Tendencia ⬇️ Bajista" 
+    
     if last_price > ema_200: ema200_label = f"Largo Plazo 🟢"
-
     else: ema200_label = f"Largo Plazo 🔴"
-
-
-
+    
     macd_label = f"MACD Hist: {macd_hist:.4f} ({'Alcista' if macd_hist > 0 else 'Bajista'})"
-
     adx_label = f"ADX: {adx:.1f} ({'Fuerte' if adx > 25 else 'Débil/Lateral'})"
-
-
-
+            
     # Importante: Necesitas 'pytz' y 'datetime' importados en la Celda 1
-
     ba_time = datetime.now(pytz.timezone("America/Argentina/Buenos_Aires")).strftime("%H:%M:%S")
 
-
-
-    # --- CÁLCULO DE SL/TP (Solo si hay señal) ---
-
+    # --- CÁLCULO DE SL/TP (APLICANDO ASIMETRÍA) ---
     if final_signal == "LONG":
-
-        stop_loss_val = last_price - (atr * SL_MULTIPLIER)
-
-        take_profit_val = last_price + (atr * TP_MULTIPLIER)
-
+        stop_loss_val = last_price - (atr * SL_MULTIPLIER_LONG)
+        take_profit_val = last_price + (atr * TP_MULTIPLIER_LONG) 
         min_tp_price = last_price + MIN_PROFIT_USD
-
         take_profit_val = max(take_profit_val, min_tp_price)
-
         signal_color_emoji = "🟢"
-
     elif final_signal == "SHORT":
-
-        stop_loss_val = last_price + (atr * SL_MULTIPLIER)
-
-        take_profit_val = last_price - (atr * TP_MULTIPLIER)
-
+        stop_loss_val = last_price + (atr * SL_MULTIPLIER_SHORT)
+        take_profit_val = last_price - (atr * TP_MULTIPLIER_SHORT)
         max_tp_price = last_price - MIN_PROFIT_USD
-
         take_profit_val = min(take_profit_val, max_tp_price)
-
         signal_color_emoji = "🔴"
 
-
-
     # Clasificación ATR
-
     if atr > 10.0: atr_desc = "ALTA"
-
     elif atr < 5.0: atr_desc = "BAJA"
-
     else: atr_desc = "NORMAL"
 
-
-
     if "volume" in df.columns:
-
         vol_usd = df.iloc[-1]["volume"] * last_price
-
         vol_status = f"(${vol_usd/1e6:.1f}M)"
-
     else:
-
         vol_status = "(Volumen no disponible)"
 
-
-
     # --- DEFINIR CONTEXTO TÉCNICO UNIFICADO ---
-
     contexto_tecnico = (
-
         f"**Contexto Técnico:**\n"
-
         f"  - 💰 Precio: ${last_price:,.2f}\n"
-
         f"  - 📊 RSI(14): {rsi:.1f}\n"
-
         f"  - 📈 Volumen: {vol_status}\n"
-
         f"  - ⚡ Volatilidad (ATR): {atr:.4f} ({atr_desc})\n"
-
         f"  - {trend_label} (EMA 20/50)\n"
-
         f"  - {ema200_label} (EMA 200): {ema_200:,.2f}\n"
-
         f"  - {macd_label}\n"
-
         f"  - {adx_label}\n"
-
     )
-
-
 
     # --- CONSTRUCCIÓN DEL MENSAJE FINAL ---
 
-
-
     if final_signal != "WAIT":
-
         # MENSAJE LONG/SHORT
-
         if last_price >= bb_upper: zone_text = "resistencia"
-
         elif last_price <= bb_lower: zone_text = "soporte"
-
         elif ema_trend: zone_text = "tendencia alcista"
-
         else: zone_text = "tendencia bajista"
 
-
-
         message_content = (
-
             f"**SEÑAL: {final_signal}** ({SYMBOL}) | Zona: {zone_text}\n\n"
-
             f"{signal_color_emoji} **Comentario:** {comment.strip()}\n"
-
             f"**Confianza (ML):** {conf_text} ({confidence_score}%)\n\n"
-
             f"🔍 **Parámetros de Orden:**\n"
-
             f"  - 💡 Señal: {final_signal}\n"
-
             f"  - 📉 Stop Loss: {stop_loss_val:,.2f}\n"
-
             f"  - 📈 Take Profit: {take_profit_val:,.2f}\n\n"
-
             f"{contexto_tecnico}"
-
             f"⏰ Hora Buenos Aires: {ba_time}"
-
         )
-
     else:
-
         # MENSAJE WAIT
-
         message_content = (
-
             f"🛑 **SEÑAL: {final_signal}** ({SYMBOL})\n\n"
-
             f"{conf_emoji} **Comentario:** {comment.strip()}\n"
-
             f"**Confianza (ML):** {conf_text} ({confidence_score}%)\n\n"
-
             f"{contexto_tecnico}"
-
             f"⏰ Hora Buenos Aires: {ba_time}"
-
         )
-
-
 
     return final_signal, message_content, conf_emoji, conf_text
 
